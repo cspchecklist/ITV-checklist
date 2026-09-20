@@ -1041,7 +1041,7 @@ function emailReport(data, blob, filename) {
   const vehicleCount = data.vehicles.length;
   const totalIssues = data.vehicles.reduce((sum, v) => sum + v.rows.filter(r => r.value === 'Issue').length, 0);
 
-  blobToBase64(blob).then(pdfBase64 => {
+  return blobToBase64(blob).then(pdfBase64 => {
     const payload = {
       equipmentType: 'Terminal Tractor',
       date: formatDMY(data.inspectDate),
@@ -1060,10 +1060,21 @@ function emailReport(data, blob, filename) {
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload)
     });
-  }).then(() => {
-    showToast('Report submitted — check your email shortly.');
-  }).catch(() => {
-    showToast('PDF saved locally, but could not reach the server to email it (check your connection).');
+  });
+}
+
+/* Races a submit attempt against a timeout and always resolves (never
+   rejects), so the caller can proceed to the download no matter what
+   happened. Used to cap how long we wait before downloading anyway. */
+function submitWithTimeout(promise, ms) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => { if (!settled) { settled = true; resolve('timeout'); } }, ms);
+    promise.then(() => {
+      if (!settled) { settled = true; clearTimeout(timer); resolve('success'); }
+    }).catch(() => {
+      if (!settled) { settled = true; clearTimeout(timer); resolve('failed'); }
+    });
   });
 }
 
@@ -1092,17 +1103,32 @@ function downloadPdf() {
 
   const blob = assembleTractorPdf(data);
   const filename = makeFilename(inspectDate);
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
 
-  showToast('PDF downloaded successfully!');
-  emailReport(data, blob, filename);
+  showToast('Submitting report...');
+
+  /* Submit BEFORE downloading. On iPhone especially, the moment a file
+     download appears the person's attention (and the browser's background
+     activity) can move away from this page, which can cut off a network
+     request still in flight. Sending first, capped by a short timeout so a
+     slow or absent connection never blocks the PDF, closes that gap. */
+  submitWithTimeout(emailReport(data, blob, filename), 4500).then(status => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+    if (status === 'success') {
+      showToast('PDF downloaded and report submitted successfully.');
+    } else if (status === 'timeout') {
+      showToast('PDF downloaded. Submission is taking longer than usual — it will keep trying in the background.');
+    } else {
+      showToast('PDF downloaded, but could not reach the server to submit (check your connection).');
+    }
+  });
 }
 </script>
 </body>
