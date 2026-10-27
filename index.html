@@ -284,11 +284,10 @@
       <div class="footer-inner">
         <div class="btnrow">
           <button type="button" class="submitbtn" onclick="downloadPdf()">Download &amp; Submit</button>
-          <button type="button" class="ghostbtn" onclick="exportBackup()">Save Progress (Backup)</button>
-          <button type="button" class="ghostbtn" onclick="document.getElementById('loadBackupInput').click()">Load Backup</button>
-          <input type="file" id="loadBackupInput" accept=".json" style="display:none;" onchange="importBackup(event)">
+          <button type="button" class="ghostbtn" onclick="saveProgress()">Save Progress</button>
+          <button type="button" class="ghostbtn" onclick="loadProgress()">Load Saved Progress</button>
         </div>
-        <div class="footnote">Save Progress downloads a small backup file — if your browser tab closes, use Load Backup to resume exactly where you left off. To share the PDF on WhatsApp: after downloading, open your Files/Downloads app, tap the PDF, then use its Share icon.</div>
+        <div class="footnote">Save Progress stores your entries on this device — tap Load Saved Progress next time to resume exactly where you left off, no file to manage. To share the PDF on WhatsApp: after downloading, open your Files/Downloads app, tap the PDF, then use its Share icon.</div>
         <div class="errmsg" id="sessionErrMsg">Please complete Date, Time, Company Name, ITV Supervisor Name, and add at least one vehicle.</div>
       </div>
     </div>
@@ -520,58 +519,52 @@ function showToast(msg) {
   setTimeout(() => div.remove(), 3600);
 }
 
-/* ================= Session backup (export/import JSON) ================= */
-function exportBackup() {
-  const session = {
-    inspectDate: document.getElementById('inspectDate').value,
-    inspectTime: document.getElementById('inspectTime').value,
-    companyName: document.getElementById('companyName').value,
-    inchargeName: document.getElementById('inchargeName').value,
-    comments: document.getElementById('comments').value,
-    vehicles: sessionVehicles
-  };
-  const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `TerminalTractor_Backup_${formatDMY(session.inspectDate) || 'session'}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
-  showToast('Backup saved. Use Load Backup to resume this session later.');
+/* ================= Save / Load progress (localStorage, silent on-device) ================= */
+const PROGRESS_KEY = 'CSPADT_TerminalTractor_Progress_V1';
+
+function saveProgress() {
+  try {
+    const session = {
+      inspectDate: document.getElementById('inspectDate').value,
+      inspectTime: document.getElementById('inspectTime').value,
+      companyName: document.getElementById('companyName').value,
+      inchargeName: document.getElementById('inchargeName').value,
+      comments: document.getElementById('comments').value,
+      vehicles: sessionVehicles
+    };
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(session));
+    showToast('Progress saved on this device.');
+  } catch (err) {
+    showToast('Unable to save on this browser.');
+  }
 }
 
-function importBackup(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const session = JSON.parse(reader.result);
-      const dateField = document.getElementById('inspectDate');
-      const restoredDate = session.inspectDate || '';
-      dateField.value = restoredDate;
-      // If resuming a backup from an earlier day, widen the allowed minimum so the
-      // restored date isn't flagged invalid by the picker's own today-only restriction.
-      if (restoredDate && restoredDate < dateField.min) {
-        dateField.min = restoredDate;
-      }
-      document.getElementById('inspectTime').value = session.inspectTime || '';
-      document.getElementById('companyName').value = session.companyName || '';
-      document.getElementById('inchargeName').value = session.inchargeName || '';
-      document.getElementById('comments').value = session.comments || '';
-      sessionVehicles = Array.isArray(session.vehicles) ? session.vehicles : [];
-      editingIndex = -1;
-      clearEntryForm();
-      renderVehicleList();
-      showToast(`Backup loaded: ${sessionVehicles.length} vehicle(s) restored`);
-    } catch (err) {
-      showToast('Could not read that backup file.');
-    }
-  };
-  reader.readAsText(file);
-  event.target.value = '';
+function loadProgress() {
+  let session;
+  try {
+    session = JSON.parse(localStorage.getItem(PROGRESS_KEY) || 'null');
+  } catch (err) {
+    session = null;
+  }
+  if (!session) { showToast('No saved progress found on this device.'); return; }
+
+  const dateField = document.getElementById('inspectDate');
+  const restoredDate = session.inspectDate || '';
+  dateField.value = restoredDate;
+  // If resuming a session from an earlier day, widen the allowed minimum so the
+  // restored date isn't flagged invalid by the picker's own today-only restriction.
+  if (restoredDate && restoredDate < dateField.min) {
+    dateField.min = restoredDate;
+  }
+  document.getElementById('inspectTime').value = session.inspectTime || '';
+  document.getElementById('companyName').value = session.companyName || '';
+  document.getElementById('inchargeName').value = session.inchargeName || '';
+  document.getElementById('comments').value = session.comments || '';
+  sessionVehicles = Array.isArray(session.vehicles) ? session.vehicles : [];
+  editingIndex = -1;
+  clearEntryForm();
+  renderVehicleList();
+  showToast(`Saved progress loaded: ${sessionVehicles.length} vehicle(s) restored.`);
 }
 
 window.onload = function () {
